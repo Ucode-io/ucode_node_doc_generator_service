@@ -1,0 +1,120 @@
+const grpc = require('@grpc/grpc-js');
+const protoLoader = require('@grpc/proto-loader');
+const path = require('path');
+
+// Load proto file
+const PROTO_PATH = path.join(__dirname, 'proto', 'document_generation', 'document_generation.proto');
+const packageDefinition = protoLoader.loadSync(PROTO_PATH, {
+    keepCase: true,
+    longs: String,
+    enums: String,
+    defaults: true,
+    oneofs: true
+});
+
+const documentServiceProto = grpc.loadPackageDefinition(packageDefinition).document_generation;
+
+class DocumentServiceClient {
+    constructor(address = 'localhost:50051') {
+        this.client = new documentServiceProto.DocumentGenerationService(address, grpc.credentials.createInsecure());
+    }
+
+    convertHtml(htmlLink, outputFormat) {
+        console.log("HIIIIII");
+        return new Promise((resolve, reject) => {
+            // Convert string format to enum
+            console.log("HIIIIII 11 1 1 1");
+            let formatEnum = 0; // PDF
+            if (outputFormat.toLowerCase() === 'docx') {
+                formatEnum = 1; // DOCX
+            } else if (outputFormat.toLowerCase() !== 'pdf') {
+                // Return error for invalid format
+                resolve({
+                    success: false,
+                    file_url: '',
+                    file_name: '',
+                    output_format: '',
+                    conversion_time: '0',
+                    error_message: 'Invalid output format. Allowed formats: pdf, docx'
+                });
+                return;
+            }
+
+            const request = {
+                html_link: htmlLink,
+                output_format: formatEnum
+            };
+
+            this.client.convertHtml(request, (error, response) => {
+                if (error) {
+                    reject(error);
+                } else {
+                    resolve(response);
+                }
+            });
+        });
+    }
+
+    generateDocument(link, data) {
+        return new Promise((resolve, reject) => {
+            const request = {
+                link: link,
+                data: data
+            };
+
+            this.client.generateDocument(request, (error, response) => {
+                if (error) {
+                    reject(error);
+                } else {
+                    resolve(response);
+                }
+            });
+        });
+    }
+
+    // Close client connection
+    close() {
+        this.client.close();
+    }
+}
+
+module.exports = DocumentServiceClient;
+
+// Example usage and testing functions
+if (require.main === module) {
+    async function testGrpcService() {
+        const client = new DocumentServiceClient();
+        
+        try {
+            console.log(' Testing gRPC Document Service...\n');
+            
+            // Test 1: Convert HTML to PDF
+            console.log(' Testing HTML to PDF conversion...');
+            const pdfResult = await client.convertHtml('https://httpbin.org/html', 'pdf');
+            console.log('PDF Result:', JSON.stringify(pdfResult, null, 2));
+            
+            // Test 2: Convert HTML to DOCX
+            console.log('\n Testing HTML to DOCX conversion...');
+            const docxResult = await client.convertHtml('https://httpbin.org/html', 'docx');
+            console.log('DOCX Result:', JSON.stringify(docxResult, null, 2));
+            
+            // Test 3: Invalid format
+            console.log('\n Testing invalid format handling...');
+            const invalidResult = await client.convertHtml('https://httpbin.org/html', 'invalid');
+            console.log('Invalid Format Result:', JSON.stringify(invalidResult, null, 2));
+            
+            // Test 4: Document generation
+            console.log('\n Testing document generation...');
+            const docResult = await client.generateDocument('https://httpbin.org/html', { test: 'data' });
+            console.log('Document Generation Result:', JSON.stringify(docResult, null, 2));
+            
+        } catch (error) {
+            console.error(' Test failed:', error);
+        } finally {
+            client.close();
+        }
+    }
+
+    // Run tests
+    testGrpcService();
+}

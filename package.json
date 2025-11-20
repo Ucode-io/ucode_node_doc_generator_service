@@ -1,0 +1,48 @@
+{
+  "name": "ucode_node_doc_generator_service",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "jest",
+    "test:grpc": "node tests/integration-test.js",
+    "test:watch": "jest --watch",
+    "start": "node server.js",
+    "start:legacy": "node backup/index.js.backup",
+    "start:grpc:legacy": "node backup/grpc-server.js.backup",
+    "dev": "NODE_ENV=development node server.js",
+    "lint": "eslint src/ --fix",
+    "clean": "rm -rf temp/*",
+    "backup:restore": "cp backup/*.backup ."
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@grpc/grpc-js": "^1.13.4",
+    "@grpc/proto-loader": "^0.8.0",
+    "angular-expressions": "^1.2.1",
+    "axios": "^1.7.7",
+    "cheerio": "^1.1.2",
+    "cors": "^2.8.5",
+    "docx": "^9.5.1",
+    "docx-pdf": "^0.0.1",
+    "docxtemplater": "^3.50.0",
+    "dotenv": "^17.2.1",
+    "express": "^4.20.0",
+    "html-to-docx": "^1.8.0",
+    "jsdom": "^25.0.1",
+    "mammoth": "^1.8.0",
+    "pdf-lib": "^1.17.1",
+    "pizzip": "^3.1.7",
+    "playwright": "^1.54.2",
+    "puppeteer": "^23.11.1",
+    "swagger-jsdoc": "^6.2.8",
+    "swagger-ui-express": "^5.0.1",
+    "undici": "5.28.4"
+  },
+  "devDependencies": {
+    "jest": "^30.0.5",
+    "supertest": "^7.1.4"
+  }
+}

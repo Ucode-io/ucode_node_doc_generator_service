@@ -1,0 +1,52 @@
+# Node modules (will be installed via npm)
+node_modules
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Development files
+.git
+.gitignore
+README.md
+API_DOCS.md
+REFACTORING_PLAN.md
+REFACTORING_SUMMARY.md
+Makefile
+
+# Test files
+tests/
+jest.config.json
+*.test.js
+
+# Backup files
+backup/
+
+# Development dependencies
+.eslintrc*
+.prettierrc*
+.env.development
+.env.local
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Temporary files
+*.tmp
+*.log
+
+# Docker files
+Dockerfile
+.dockerignore
+
+# Build artifacts
+dist/
+build/
+coverage/

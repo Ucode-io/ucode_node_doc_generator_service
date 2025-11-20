@@ -1,0 +1,484 @@
+const express = require('express');
+const axios = require('axios');
+const fs = require('fs');
+const Docxtemplater = require('docxtemplater');
+const PizZip = require('pizzip');
+const docxPdf = require('docx-pdf');
+const swaggerJsdoc = require('swagger-jsdoc');
+const swaggerUi = require('swagger-ui-express');
+const cors = require('cors');
+const cfg = require('./config/index');
+const angularParser = require('angular-expressions');
+
+const mammoth = require('mammoth');
+const puppeteer = require('puppeteer');
+const htmlToDocx = require('html-to-docx');
+const os = require('os');
+
+const { PDFDocument, rgb } = require('pdf-lib');
+const { readFileSync, writeFileSync } = require('fs');
+const { JSDOM } = require('jsdom');
+
+// Import gRPC server
+const { startGrpcServer } = require('./grpc-server');
+
+const app = express();
+const port = cfg.http_port;
+
+const { convertapi_secrets } = require('./config/constants');
+
+app.use(cors()); 
+app.use(express.json()); // Middleware to parse JSON data
+
+// Swagger setup
+const swaggerOptions = {
+    definition: {
+        openapi: '3.0.0',
+        info: {
+            title: 'Document Generation API',
+            version: '1.0.0',
+            description: 'API for generating documents from templates',
+            contact: {
+                name: 'API Support',
+                email: 'support@example.com'
+            },
+        },
+    },
+    apis: ['./index.js'],
+};
+
+const swaggerSpecs = swaggerJsdoc(swaggerOptions);
+app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpecs));
+
+
+// Utility function to upload file to CDN and return link
+async function uploadToCDN(filePath, fileName) {
+    try {
+        // Read file as base64
+        const fileData = fs.readFileSync(filePath);
+        const base64FileData = fileData.toString('base64');
+
+        // For demonstration, we'll use the same ConvertAPI service to store the file
+        // In production, you might want to use a dedicated CDN service
+        const payload = {
+            Parameters: [
+                {
+                    Name: 'File',
+                    FileValue: {
+                        Name: fileName,
+                        Data: base64FileData
+                    }
+                },
+                {
+                    Name: 'StoreFile',
+                    Value: true
+                }
+            ]
+        };
+
+        // Use the first convert API secret for file storage
+        const convertapi_secret = convertapi_secrets[0];
+        
+        const response = await axios.post(
+            `https://v2.convertapi.com/convert/pdf/to/pdf?Secret=${convertapi_secret}`,
+            payload,
+            {
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+            }
+        );
+
+        if (response.data && response.data.Files && response.data.Files[0]) {
+            return response.data.Files[0].Url;
+        }
+        
+        throw new Error('Failed to upload to CDN');
+    } catch (error) {
+        console.error('Error uploading to CDN:', error);
+        throw error;
+    }
+}
+
+// const data2 = {
+//     "clients": [
+//         {
+//             "first_name": "Zafarbek",
+//             "last_name": "Khamidullayev",
+//             "phone": "+998777 8866"
+//         },
+//         {
+//             "first_name": "Jason",
+//             "last_name": "Statham",
+//             "phone": "+998777 6688"
+//         }
+//     ],
+//     "first_name": "Hipp",
+//     "last_name": "Edgar",
+//     "phone": "0652455478",
+//     "description": "New Website is",
+//     "order": {
+//         "count": 12
+//     }
+// };
+
+/**
+ * @swagger
+ * components:
+ *   schemas:
+ *     ConvertHtmlRequest:
+ *       type: object
+ *       required:
+ *         - htmlLink
+ *         - outputFormat
+ *       properties:
+ *         htmlLink:
+ *           type: string
+ *           description: HTML faylning havolasi
+ *           example: "https://example.com/document.html"
+ *         outputFormat:
+ *           type: string
+ *           enum: [pdf, docx]
+ *           description: Konvertatsiya format turi (faqat 'pdf' yoki 'docx')
+ *           example: "pdf"
+ *     ConvertHtmlResponse:
+ *       type: object
+ *       properties:
+ *         success:
+ *           type: boolean
+ *           description: Konvertatsiya muvaffaqiyat holati
+ *         fileUrl:
+ *           type: string
+ *           description: Konvertatsiya qilingan faylning havolasi
+ *         fileName:
+ *           type: string
+ *           description: Konvertatsiya qilingan fayl nomi
+ *         outputFormat:
+ *           type: string
+ *           description: Konvertatsiya qilingan format
+ *         conversionTime:
+ *           type: number
+ *           description: Konvertatsiya vaqti (millisekund)
+ *
+ * /convert-html:
+ *   post:
+ *     summary: HTML kontentni PDF yoki DOCX formatiga konvertatsiya qilish
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             $ref: '#/components/schemas/ConvertHtmlRequest'
+ *     responses:
+ *       200:
+ *         description: Muvaffaqiyatli konvertatsiya
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ConvertHtmlResponse'
+ *       400:
+ *         description: Noto'g'ri so'rov yoki parametrlar
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 error:
+ *                   type: string
+ *                   example: "Invalid output format. Allowed formats: pdf, docx"
+ *       500:
+ *         description: Server xatoligi
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 error:
+ *                   type: string
+ *                   example: "Error during conversion"
+ */
+app.post('/convert-html', async (req, res) => {
+    const { htmlLink, outputFormat } = req.body;
+
+    // Validate required fields
+    if (!htmlLink) {
+        return res.status(400).json({ 
+            success: false, 
+            error: 'HTML link is required.' 
+        });
+    }
+
+    if (!outputFormat) {
+        return res.status(400).json({ 
+            success: false, 
+            error: 'Output format is required.' 
+        });
+    }
+
+    // Validate output format enum
+    const allowedFormats = ['pdf', 'docx'];
+    if (!allowedFormats.includes(outputFormat.toLowerCase())) {
+        return res.status(400).json({ 
+            success: false, 
+            error: `Invalid output format. Allowed formats: ${allowedFormats.join(', ')}` 
+        });
+    }
+
+    const format = outputFormat.toLowerCase();
+    console.log(`${format.toUpperCase()} konvertatsiya boshlandi...`);
+
+    try {
+        // Fetch HTML content from the provided link
+        const htmlResponse = await axios({
+            method: 'get',
+            url: htmlLink,
+            responseType: 'text'
+        });
+
+        if (htmlResponse.status !== 200) {
+            console.error('Failed to fetch HTML. Status:', htmlResponse.status);
+            return res.status(400).json({ 
+                success: false, 
+                error: 'Failed to fetch HTML content.' 
+            });
+        }
+
+        const htmlContent = htmlResponse.data;
+        const startTime = Date.now();
+
+        let fileUrl, fileName, tempFilePath;
+
+        if (format === 'pdf') {
+            // PDF conversion using Puppeteer
+            const browser = await puppeteer.launch({
+                headless: true,
+                args: ['--no-sandbox', '--disable-setuid-sandbox']
+            });
+
+            const page = await browser.newPage();
+            await page.setContent(htmlContent, { waitUntil: 'networkidle0' });
+
+            // Generate PDF
+            tempFilePath = './temp/html_output.pdf';
+            await page.pdf({ 
+                path: tempFilePath, 
+                format: 'A4',
+                printBackground: true,
+                margin: {
+                    top: '1cm',
+                    right: '1cm',
+                    bottom: '1cm',
+                    left: '1cm'
+                }
+            });
+
+            await browser.close();
+            fileName = 'converted_output.pdf';
+
+        } else if (format === 'docx') {
+            // DOCX conversion using html-to-docx
+            const buffer = await htmlToDocx(htmlContent);
+
+            // Save to temporary file
+            tempFilePath = './temp/html_output.docx';
+            fs.writeFileSync(tempFilePath, buffer);
+            fileName = 'converted_output.docx';
+        }
+
+        // Upload to CDN
+        fileUrl = await uploadToCDN(tempFilePath, fileName);
+        
+        const endTime = Date.now();
+        const conversionTime = endTime - startTime;
+
+        // Clean up temporary file
+        fs.unlinkSync(tempFilePath);
+
+        console.log(`${format.toUpperCase()} fayl tayyor: ${fileUrl} (${conversionTime}ms)`);
+
+        res.json({
+            success: true,
+            fileUrl: fileUrl,
+            fileName: fileName,
+            outputFormat: format,
+            conversionTime: conversionTime
+        });
+
+    } catch (error) {
+        console.error(`❌ ${format.toUpperCase()} konvertatsiya xatolik:`, error);
+        return res.status(500).json({ 
+            success: false, 
+            error: `Error during ${format.toUpperCase()} conversion.`,
+            details: error.message 
+        });
+    }
+});
+
+/**
+ * @swagger
+ * /generate-doc:
+ *   post:
+ *     summary: Generates a PDF document from a template downloaded from a Minio link
+ *     parameters:
+ *       - in: query
+ *         name: link
+ *         schema:
+ *           type: string
+ *         required: true
+ *         description: The Minio link to the DOCX file
+ *       - in: query
+ *         name: data
+ *         schema:
+ *           type: object
+ *         required: true
+ *         description: The data to be injected into the DOCX template
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               additionalProperties: true
+ *     responses:
+ *       200:
+ *         description: The generated PDF document
+ *         content:
+ *           application/pdf:
+ *             schema:
+ *               type: string
+ *               format: binary
+ *       400:
+ *         description: Invalid link
+ *       500:
+ *         description: Error rendering document
+ */
+app.post('/generate-doc', async (req, res) => {
+    const { link, data } = req.query;
+
+    if (!link) {
+        return res.status(400).send('Invalid link.');
+    }
+
+    console.log("Received link:", link);
+
+    // let newRelations = JSON.parse(relations)
+    // console.log("new relations data", newRelations?.data)
+    let newData = JSON.parse(data)
+    console.log("new data", newData)
+    
+    try {
+        const response = await axios({
+            method: 'get',
+            url: link,
+            responseType: 'arraybuffer'
+        });
+
+        if (response.status !== 200) {
+            console.error('Failed to fetch the document. Status:', response.status);
+            return res.status(400).send('Failed to fetch the document.');
+        }
+
+        console.log("this is response after link", link, response.status)
+
+        const contentType = response.headers['content-type'];
+        if (!contentType || !contentType.includes('application/vnd.openxmlformats-officedocument.wordprocessingml.document')) {
+            console.error('Invalid content type:', contentType);
+            return res.status(400).send('The provided link does not point to a valid DOCX file.');
+        }
+
+        const content = Buffer.from(response.data);
+        const zip = new PizZip(content);
+      
+        const expressionParser = require('docxtemplater/expressions.js');
+        const doc = new Docxtemplater(zip, { parser: expressionParser });
+
+        doc.setData(newData);
+        doc.render();
+
+        const buf = doc.getZip().generate({ type: 'nodebuffer' });
+
+        const tempDocxPath = './temp/output.docx';
+        fs.writeFileSync(tempDocxPath, buf);
+
+        const filePath = tempDocxPath;
+        const fileData = fs.readFileSync(filePath);
+        const base64FileData = fileData.toString('base64');
+
+
+        const payload = {
+            Parameters: [
+              {
+                Name: 'File',
+                FileValue: {
+                  Name: 'output.docx',
+                  Data: base64FileData
+                }
+              },
+              {
+                Name: 'StoreFile',
+                Value: true
+              }
+            ]
+        };
+
+        // generate random number between 0 and 3 to select convertapi secret
+        const randomIndex = Math.floor(Math.random() * 4);
+        console.log("going to convert to pdf1",randomIndex)
+        const convertapi_secret = convertapi_secrets[randomIndex];
+
+        const convertResp = await axios.post(
+            `https://v2.convertapi.com/convert/docx/to/pdf?Secret=${convertapi_secret}`,
+            payload,
+            {
+              headers: {
+                'Content-Type': 'application/json',
+              },
+            }
+          );
+        console.log("response of ", convertResp.status)
+
+        console.log("AAA link", convertResp.data.Files[0].Url);
+
+        const pdfLinkResp = await axios({
+            method: 'get',
+            url: convertResp.data.Files[0].Url,
+            responseType: 'arraybuffer'
+        });
+
+        if (pdfLinkResp.status !== 200) {
+            console.error('1 Failed to fetch the document. Status:', pdfLinkResp.status);
+            return res.status(400).send('Failed to fetch the document.');
+        }
+
+        const pdfContent = Buffer.from(pdfLinkResp.data);
+        const pdfPath = './temp/output.pdf';
+        fs.writeFileSync(pdfPath, pdfContent);
+
+        res.setHeader('Content-Type', 'application/pdf');
+        res.setHeader('Content-Disposition', 'attachment; filename=generated.pdf');
+
+        fs.unlinkSync(tempDocxPath);
+        fs.unlinkSync(pdfPath);
+
+        res.send(pdfContent);
+    } catch (error) {
+        console.error('Error fetching or rendering document:', error);
+        return res.status(500).send('Error rendering document.');
+    }
+});
+
+// Start both HTTP and gRPC servers
+app.listen(port, () => {
+    console.log(`HTTP Server is running on http://localhost:${port}`);
+    console.log(`Swagger documentation available at http://localhost:${port}/api-docs`);
+});
+
+// Start gRPC server
+startGrpcServer();
+
+// Export the app for testing
+module.exports = app;

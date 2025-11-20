@@ -1,0 +1,326 @@
+const grpc = require('@grpc/grpc-js');
+const protoLoader = require('@grpc/proto-loader');
+const path = require('path');
+
+const express = require('express');
+const axios = require('axios');
+const fs = require('fs');
+const Docxtemplater = require('docxtemplater');
+const PizZip = require('pizzip');
+const puppeteer = require('puppeteer');
+const htmlToDocx = require('html-to-docx');
+const { execSync } = require('child_process');
+
+const cfg = require('./config/index');
+const { convertapi_secrets } = require('./config/constants');
+
+// Load proto file
+const PROTO_PATH = path.join(__dirname, 'proto', 'document_generation', 'document_generation.proto');
+const packageDefinition = protoLoader.loadSync(PROTO_PATH, {
+    keepCase: true,
+    longs: String,
+    enums: String,
+    defaults: true,
+    oneofs: true
+});
+
+const documentServiceProto = grpc.loadPackageDefinition(packageDefinition).document_generation;
+
+// Utility function to upload file to CDN and return link
+async function uploadToCDN(filePath, fileName) {
+    try {
+        // Read file as base64
+        const fileData = fs.readFileSync(filePath);
+        const base64FileData = fileData.toString('base64');
+
+        const payload = {
+            Parameters: [
+                {
+                    Name: 'File',
+                    FileValue: {
+                        Name: fileName,
+                        Data: base64FileData
+                    }
+                },
+                {
+                    Name: 'StoreFile',
+                    Value: true
+                }
+            ]
+        };
+
+        const convertapi_secret = convertapi_secrets[0];
+        
+        const response = await axios.post(
+            `https://v2.convertapi.com/convert/pdf/to/pdf?Secret=${convertapi_secret}`,
+            payload,
+            {
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+            }
+        );
+
+        if (response.data && response.data.Files && response.data.Files[0]) {
+            return response.data.Files[0].Url;
+        }
+        
+        throw new Error('Failed to upload to CDN');
+    } catch (error) {
+        console.error('Error uploading to CDN:', error);
+        throw error;
+    }
+}
+
+// gRPC service implementation
+const documentService = {
+    // Generate document from template
+    generateDocument: async (call, callback) => {
+        const { link, data } = call.request;
+
+        if (!link) {
+            return callback(null, {
+                success: false,
+                pdf_content: '',
+                error_message: 'Invalid link.'
+            });
+        }
+
+        try {
+            const response = await axios({
+                method: 'get',
+                url: link,
+                responseType: 'arraybuffer'
+            });
+
+            if (response.status !== 200) {
+                return callback(null, {
+                    success: false,
+                    pdf_content: '',
+                    error_message: 'Failed to fetch the document.'
+                });
+            }
+
+            const content = Buffer.from(response.data);
+            const zip = new PizZip(content);
+          
+            const expressionParser = require('docxtemplater/expressions.js');
+            const doc = new Docxtemplater(zip, { parser: expressionParser });
+
+            const templateData = data ? JSON.parse(JSON.stringify(data)) : {};
+            doc.setData(templateData);
+            doc.render();
+
+            const buf = doc.getZip().generate({ type: 'nodebuffer' });
+
+            const tempDocxPath = './temp/output.docx';
+            fs.writeFileSync(tempDocxPath, buf);
+
+            const fileData = fs.readFileSync(tempDocxPath);
+            const base64FileData = fileData.toString('base64');
+
+            const payload = {
+                Parameters: [
+                  {
+                    Name: 'File',
+                    FileValue: {
+                      Name: 'output.docx',
+                      Data: base64FileData
+                    }
+                  },
+                  {
+                    Name: 'StoreFile',
+                    Value: true
+                  }
+                ]
+            };
+
+            const randomIndex = Math.floor(Math.random() * 4);
+            const convertapi_secret = convertapi_secrets[randomIndex];
+
+            const convertResp = await axios.post(
+                `https://v2.convertapi.com/convert/docx/to/pdf?Secret=${convertapi_secret}`,
+                payload,
+                {
+                  headers: {
+                    'Content-Type': 'application/json',
+                  },
+                }
+            );
+
+            const pdfLinkResp = await axios({
+                method: 'get',
+                url: convertResp.data.Files[0].Url,
+                responseType: 'arraybuffer'
+            });
+
+            const pdfContent = Buffer.from(pdfLinkResp.data);
+            const pdfBase64 = pdfContent.toString('base64');
+
+            fs.unlinkSync(tempDocxPath);
+
+            callback(null, {
+                success: true,
+                pdf_content: pdfBase64,
+                error_message: ''
+            });
+
+        } catch (error) {
+            callback(null, {
+                success: false,
+                pdf_content: '',
+                error_message: 'Error rendering document.'
+            });
+        }
+    },
+
+    // Convert HTML to PDF or DOCX
+    convertHtml: async (call, callback) => {
+       
+        const { html_link, output_format } = call.request;
+
+        if (!html_link) {
+            return callback(null, {
+                success: false,
+                file_url: '',
+                file_name: '',
+                output_format: 'PDF',
+                conversion_time: 0,
+                error_message: 'HTML link is required.'
+            });
+        }
+        if (output_format === undefined || output_format === null) {
+            return callback(null, {
+                success: false,
+                file_url: '',
+                file_name: '',
+                output_format: 'PDF',
+                conversion_time: 0,
+                error_message: 'Output format is required.'
+            });
+        }
+        let formatString = 'pdf';
+        if (output_format === "pdf") {
+            formatString = 'pdf';
+        } else if (output_format === "docx" || output_format === "doc") {
+            formatString = 'docx';
+        } else {
+            return callback(null, {
+                success: false,
+                file_url: '',
+                file_name: '',
+                output_format: 'PDF',
+                conversion_time: 0,
+                error_message: 'Invalid output format. Allowed formats: PDF, DOCX'
+            });
+        }
+
+        const format = formatString.toLowerCase();
+
+        try {
+            const htmlResponse = await axios({
+                method: 'get',
+                url: html_link,
+                responseType: 'text'
+            });
+
+            if (htmlResponse.status !== 200) {
+                return callback(null, {
+                    success: false,
+                    file_url: '',
+                    file_name: '',
+                    output_format: format.toUpperCase(),
+                    conversion_time: 0,
+                    error_message: 'Failed to fetch HTML content.'
+                });
+            }
+
+            const htmlContent = htmlResponse.data;
+            const startTime = Date.now();
+
+            let fileUrl, fileName, tempFilePath;
+
+if (format === 'pdf') {
+    const tempHtmlPath = './temp/temp_input.html';
+    tempFilePath = './temp/html_output.pdf';
+
+    // 1. HTML faylni yozish
+    fs.writeFileSync(tempHtmlPath, htmlContent);
+
+    // 2. wkhtmltopdf bilan konvertatsiya qilish
+    try {
+        execSync(`wkhtmltopdf ${tempHtmlPath} ${tempFilePath}`);
+    } catch (err) {
+        return callback(null, {
+            success: false,
+            file_url: '',
+            file_name: '',
+            output_format: format.toUpperCase(),
+            conversion_time: 0,
+            error_message: `wkhtmltopdf error: ${err.message}`
+        });
+    }
+
+    // 3. Ortiqcha faylni tozalash
+    fs.unlinkSync(tempHtmlPath);
+
+    fileName = 'converted_output.pdf';
+} else if (format === 'docx') {
+                const buffer = await htmlToDocx(htmlContent);
+                tempFilePath = './temp/html_output.docx';
+                fs.writeFileSync(tempFilePath, buffer);
+                fileName = 'converted_output.docx';
+            }
+
+            fileUrl = await uploadToCDN(tempFilePath, fileName);
+            
+            const endTime = Date.now();
+            const conversionTime = endTime - startTime;
+
+            fs.unlinkSync(tempFilePath);
+
+            callback(null, {
+                success: true,
+                file_url: fileUrl,
+                file_name: fileName,
+                output_format: format.toUpperCase(),
+                conversion_time: conversionTime,
+                error_message: ''
+            });
+
+        } catch (error) {
+            callback(null, {
+                success: false,
+                file_url: '',
+                file_name: '',
+                output_format: format.toUpperCase(),
+                conversion_time: 0,
+                error_message: `Error during ${format.toUpperCase()} conversion: ${error.message}`
+            });
+        }
+    }
+};
+
+// Create and start gRPC server
+function startGrpcServer() {
+    const server = new grpc.Server();
+    
+    server.addService(documentServiceProto.DocumentGenerationService.service, documentService);
+    
+    const grpcPort = cfg.grpc_port || 50051;
+    const bindAddress = `0.0.0.0:${grpcPort}`;
+    
+    server.bindAsync(bindAddress, grpc.ServerCredentials.createInsecure(), (error, port) => {
+        if (error) {
+            console.error('gRPC Server failed to bind:', error);
+            return;
+        }
+        
+        console.log(`gRPC Server is running on ${bindAddress}`);
+        server.start();
+    });
+    
+    return server;
+}
+
+module.exports = { startGrpcServer };
