@@ -278,7 +278,7 @@ class HtmlConverterService {
                 printBackground: true,
                 margin: {
                     top: '20mm',
-                    right: '10mm',
+                    right: '20mm',
                     bottom: '20mm',
                     left: '20mm'
                 }
