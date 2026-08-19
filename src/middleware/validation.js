@@ -140,7 +140,7 @@ class ValidationMiddleware {
         }
 
         if (!Validators.isValidOutputFormat(format)) {
-            return next(createError.validation('outputFormat must be either "pdf" or "docx"'));
+            return next(createError.validation('outputFormat must be one of "pdf", "docx" or "png"'));
         }
 
         // Normalize format to lowercase

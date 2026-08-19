@@ -10,19 +10,19 @@ const execAsync = util.promisify(exec);
 const cheerio = require('cheerio');
 
 /**
- * HTML Converter Service - converts HTML to PDF or DOCX
+ * HTML Converter Service - converts HTML to PDF, DOCX or PNG
  */
 class HtmlConverterService {
     constructor() {
         this.cdnService = new CdnService();
         this.tempDir = path.join(__dirname, '../../temp');
-        this.supportedFormats = ['pdf', 'docx'];
+        this.supportedFormats = ['pdf', 'docx', 'png'];
     }
 
     /**
      * Convert HTML from URL to specified format
      * @param {string} htmlLink - URL to HTML content
-     * @param {string} outputFormat - Target format ('pdf' or 'docx')
+     * @param {string} outputFormat - Target format ('pdf', 'docx' or 'png')
      * @returns {Promise<Object>} - Conversion result with file URL and metadata
      */
     async convertFromUrl(htmlLink, outputFormat) {
@@ -58,7 +58,7 @@ class HtmlConverterService {
     /**
      * Convert HTML content directly to specified format
      * @param {string} htmlContent - HTML content string
-     * @param {string} outputFormat - Target format ('pdf' or 'docx')
+     * @param {string} outputFormat - Target format ('pdf', 'docx' or 'png')
      * @returns {Promise<Object>} - Conversion result
      */
     async convertContent(htmlContent, outputFormat) {
@@ -93,7 +93,7 @@ class HtmlConverterService {
     /**
      * Convert HTML content directly to specified format and return bytes
      * @param {string} htmlContent - HTML content string
-     * @param {string} outputFormat - Target format ('pdf' or 'docx')
+     * @param {string} outputFormat - Target format ('pdf', 'docx' or 'png')
      * @returns {Promise<Object>} - Conversion result with file bytes
      */
     async convertContentToBytes(htmlContent, outputFormat) {
@@ -184,6 +184,12 @@ class HtmlConverterService {
             const result = await this._convertToDocx(htmlContent);
             tempFilePath = result.filePath;
             fileName = result.fileName;
+        } else if (format === 'png') {
+            const result = await this._convertToPng(htmlContent);
+            tempFilePath = result.filePath;
+            fileName = result.fileName;
+        } else {
+            throw new Error(`Unsupported format: ${format}`);
         }
 
         try {
@@ -218,11 +224,20 @@ class HtmlConverterService {
             const result = await this._convertToDocx(htmlContent);
             tempFilePath = result.filePath;
             fileName = result.fileName;
+        } else if (format === 'png') {
+            const result = await this._convertToPng(htmlContent);
+            tempFilePath = result.filePath;
+            fileName = result.fileName;
+        } else {
+            throw new Error(`Unsupported format: ${format}`);
         }
 
         try {
-            // Upload to CDN
-            const fileUrl = await this.cdnService.uploadFile(tempFilePath, fileName);
+            // Upload to CDN - PDF/DOCX eski konvertor endpointi orqali,
+            // PNG esa faylni to'g'ridan-to'g'ri saqlash endpointi orqali ketadi
+            const fileUrl = format === 'png'
+                ? await this.cdnService.uploadRawFile(tempFilePath, fileName)
+                : await this.cdnService.uploadFile(tempFilePath, fileName);
 
             // Clean up temporary file
             fs.unlinkSync(tempFilePath);
@@ -238,6 +253,52 @@ class HtmlConverterService {
     }
 
     /**
+     * Resolve the Chromium binary to launch.
+     * Serverda (Docker) /usr/bin/chromium-browser mavjud va o'sha ishlatiladi.
+     * Lokal muhitda (masalan macOS) u yo'q - shunda undefined qaytariladi va
+     * Puppeteer npm bilan yuklab olgan o'z brauzerini ishlatadi.
+     * @private
+     */
+    _resolveExecutablePath() {
+        const configuredPath = process.env.PUPPETEER_EXECUTABLE_PATH || '/usr/bin/chromium-browser'; // Alpine'da ba’zan '/usr/bin/chromium'
+
+        if (fs.existsSync(configuredPath)) {
+            return configuredPath;
+        }
+
+        console.warn(`Chromium not found at ${configuredPath}, falling back to Puppeteer's bundled browser`);
+
+        return undefined;
+    }
+
+    /**
+     * Launch a Puppeteer browser with the shared runtime options
+     * @private
+     */
+    async _launchBrowser() {
+        const browser = await puppeteer.launch({
+            headless: 'new', // yoki true
+            executablePath: this._resolveExecutablePath(),
+            dumpio: true,
+            timeout: 60000,
+            args: [
+                '--no-sandbox',
+                '--disable-setuid-sandbox',
+                '--disable-dev-shm-usage',
+                '--disable-gpu',
+                '--disable-software-rasterizer',
+                '--disable-features=Vulkan,UseOzonePlatform,VizDisplayCompositor',
+                '--use-angle=swiftshader',
+                '--use-gl=swiftshader',
+            ],
+        });
+
+        console.log('Puppeteer launched successfully');
+
+        return browser;
+    }
+
+    /**
      * Convert HTML to PDF using Puppeteer
      * @private
      */
@@ -245,24 +306,7 @@ class HtmlConverterService {
         let browser;
 
         try {
-            browser = await puppeteer.launch({
-                headless: 'new', // yoki true
-                executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || '/usr/bin/chromium-browser', // Alpine'da ba’zan '/usr/bin/chromium'
-                dumpio: true,
-                timeout: 60000,
-                args: [
-                    '--no-sandbox',
-                    '--disable-setuid-sandbox',
-                    '--disable-dev-shm-usage',
-                    '--disable-gpu',
-                    '--disable-software-rasterizer',
-                    '--disable-features=Vulkan,UseOzonePlatform,VizDisplayCompositor',
-                    '--use-angle=swiftshader',
-                    '--use-gl=swiftshader',
-                ],
-            });
-
-            console.log('Puppeteer launched successfully');
+            browser = await this._launchBrowser();
 
             const page = await browser.newPage();
             await page.setContent(htmlContent, {
@@ -291,6 +335,73 @@ class HtmlConverterService {
 
         } catch (error) {
             throw new Error(`PDF conversion failed: ${error.message}`);
+        } finally {
+            if (browser) {
+                await browser.close();
+            }
+        }
+    }
+
+    /**
+     * Convert HTML to PNG using Puppeteer screenshot
+     * @private
+     */
+    async _convertToPng(htmlContent) {
+        let browser;
+
+        try {
+            browser = await this._launchBrowser();
+
+            const page = await browser.newPage();
+
+            // A4 kengligiga yaqin viewport, retina sifat uchun 2x scale.
+            // Balandlik vaqtinchalik - keyin kontentga qarab qayta o'lchanadi.
+            await page.setViewport({
+                width: 1240,
+                height: 1754,
+                deviceScaleFactor: 2
+            });
+
+            await page.setContent(htmlContent, {
+                waitUntil: 'networkidle0',
+                timeout: 30000
+            });
+
+            // PDF dan farqli o'laroq PNG A4 ga cho'zilmaydi - HTML o'z balandligida chiqadi.
+            // documentElement.scrollHeight viewport balandligiga "yopishib" qoladi,
+            // shuning uchun kontentning haqiqiy balandligi body orqali o'lchanadi.
+            const contentHeight = await page.evaluate(() => {
+                const body = document.body;
+                return Math.ceil(Math.max(
+                    body.scrollHeight,
+                    body.offsetHeight,
+                    body.getBoundingClientRect().height
+                ));
+            });
+
+            if (contentHeight > 0) {
+                await page.setViewport({
+                    width: 1240,
+                    height: contentHeight,
+                    deviceScaleFactor: 2
+                });
+            }
+
+            const tempFilePath = path.join(this.tempDir, `html_output_${Date.now()}.png`);
+
+            await page.screenshot({
+                path: tempFilePath,
+                type: 'png',
+                fullPage: true
+            });
+
+            return {
+                filePath: tempFilePath,
+                fileName: 'converted_output.png'
+            };
+
+        } catch (error) {
+            throw new Error(`PNG conversion failed: ${error.message}`);
         } finally {
             if (browser) {
                 await browser.close();

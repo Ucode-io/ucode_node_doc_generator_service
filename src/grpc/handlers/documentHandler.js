@@ -73,6 +73,8 @@ class DocumentHandler {
                 formatString = 'pdf';
             } else if (format === 'docx' || format === 'doc') {
                 formatString = 'docx';
+            } else if (format === 'png') {
+                formatString = 'png';
             } else {
                 return callback(null, {
                     success: false,
@@ -80,7 +82,7 @@ class DocumentHandler {
                     file_name: '',
                     output_format: output_format,
                     conversion_time: 0,
-                    error_message: 'Invalid output format. Allowed formats: PDF, DOCX'
+                    error_message: 'Invalid output format. Allowed formats: PDF, DOCX, PNG'
                 });
             }
 

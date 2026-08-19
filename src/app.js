@@ -127,7 +127,7 @@ class Application {
                                 },
                                 outputFormat: {
                                     type: 'string',
-                                    enum: ['pdf', 'docx'],
+                                    enum: ['pdf', 'docx', 'png'],
                                     description: 'Target conversion format'
                                 }
                             }
@@ -294,7 +294,7 @@ class Application {
          *                 description: HTML content to convert
          *               outputFormat:
          *                 type: string
-         *                 enum: [pdf, docx]
+         *                 enum: [pdf, docx, png]
          *     responses:
          *       200:
          *         description: Successful conversion
