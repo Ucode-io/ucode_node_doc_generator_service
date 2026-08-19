@@ -124,9 +124,9 @@ class DocumentController {
         res.json({
             success: true,
             data: {
-                htmlConversion: ['pdf', 'docx'],
+                htmlConversion: ['pdf', 'docx', 'png'],
                 templateFormats: this.documentService.getSupportedFormats(),
-                outputFormats: ['pdf', 'docx']
+                outputFormats: ['pdf', 'docx', 'png']
             }
         });
     });

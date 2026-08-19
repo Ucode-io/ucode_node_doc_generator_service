@@ -40,7 +40,7 @@ class Validators {
      * @param {Array} allowedFormats - Array of allowed formats
      * @returns {boolean} - Validation result
      */
-    static isValidOutputFormat(format, allowedFormats = ['pdf', 'docx']) {
+    static isValidOutputFormat(format, allowedFormats = ['pdf', 'docx', 'png']) {
         if (!format || typeof format !== 'string') {
             return false;
         }
@@ -177,7 +177,7 @@ class Validators {
         if (!body.outputFormat) {
             errors.push('outputFormat is required');
         } else if (!this.isValidOutputFormat(body.outputFormat)) {
-            errors.push('outputFormat must be either "pdf" or "docx"');
+            errors.push('outputFormat must be one of "pdf", "docx" or "png"');
         }
 
         return {

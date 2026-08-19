@@ -63,6 +63,45 @@ class CdnService {
     }
 
     /**
+     * Upload a file to CDN without running it through a converter.
+     * PDF/DOCX uploadFile() dagi konvertor endpointidan foydalanadi, PNG kabi
+     * formatlar esa faqat saqlanishi kerak - shu yo'l ular uchun ishlatiladi.
+     * @param {string} filePath - Local file path to upload
+     * @param {string} fileName - Name for the uploaded file
+     * @returns {Promise<string>} - Public URL of uploaded file
+     */
+    async uploadRawFile(filePath, fileName) {
+        try {
+            const fileData = fs.readFileSync(filePath);
+
+            // Use the first convert API secret for file storage
+            const convertapi_secret = this.secrets[0];
+
+            const response = await axios.post(
+                `https://v2.convertapi.com/upload?Secret=${convertapi_secret}`,
+                fileData,
+                {
+                    headers: {
+                        'Content-Type': 'application/octet-stream',
+                        'Content-Disposition': `inline; filename="${fileName}"`,
+                    },
+                    maxBodyLength: Infinity,
+                    maxContentLength: Infinity,
+                }
+            );
+
+            if (response.data && response.data.Url) {
+                return response.data.Url;
+            }
+
+            throw new Error('Failed to upload to CDN - no file URL in response');
+        } catch (error) {
+            console.error('Error uploading raw file to CDN:', error.message);
+            throw new Error(`CDN upload failed: ${error.message}`);
+        }
+    }
+
+    /**
      * Get a random ConvertAPI secret for load balancing
      * @returns {string} - Random API secret
      */

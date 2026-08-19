@@ -101,7 +101,7 @@ describe('HTML Conversion API', () => {
                 .expect(400);
 
             expect(response.body.success).toBe(false);
-            expect(response.body.error).toBe('Invalid output format. Allowed formats: pdf, docx');
+            expect(response.body.error).toBe('Invalid output format. Allowed formats: pdf, docx, png');
         });
 
         it('should return 400 when HTML link is invalid', async () => {
@@ -172,19 +172,19 @@ describe('HTML Conversion API', () => {
         }, 20000);
 
         it('should reject unsupported formats', async () => {
-            const unsupportedFormats = ['txt', 'jpg', 'png', 'excel', 'xls', 'ppt'];
-            
+            const unsupportedFormats = ['txt', 'jpg', 'excel', 'xls', 'ppt'];
+
             for (const format of unsupportedFormats) {
                 const response = await request(app)
                     .post('/convert-html')
-                    .send({ 
+                    .send({
                         htmlLink: testHtmlUrl,
                         outputFormat: format
                     })
                     .expect(400);
 
                 expect(response.body.success).toBe(false);
-                expect(response.body.error).toBe('Invalid output format. Allowed formats: pdf, docx');
+                expect(response.body.error).toBe('Invalid output format. Allowed formats: pdf, docx, png');
             }
         });
     });

@@ -86,7 +86,21 @@ describe('REST API Integration Tests', () => {
                 .expect(400);
 
             expect(response.body).toHaveProperty('success', false);
-            expect(response.body.error).toContain('either "pdf" or "docx"');
+            expect(response.body.error).toContain('"pdf", "docx" or "png"');
+        });
+
+        test('POST /convert-html should accept png as outputFormat', async () => {
+            const response = await request(app)
+                .post('/convert-html')
+                .send({
+                    htmlLink: 'invalid-url',
+                    outputFormat: 'png'
+                })
+                .expect(400);
+
+            // png format o'tishi kerak - xato faqat htmlLink haqida bo'lsin
+            expect(response.body.error).toContain('valid HTTP/HTTPS URL');
+            expect(response.body.error).not.toContain('outputFormat');
         });
 
         test('POST /convert-html-content should validate htmlContent', async () => {

@@ -19,7 +19,7 @@ Bu loyihaga HTML fayllarni PDF va DOCX formatlariga o'tkazish uchun universal AP
 **Parametrlar:**
 - `htmlLink` (string, majburiy) - HTML faylning havolasi
 - `outputFormat` (string, majburiy) - Konvertatsiya format turi
-  - Qabul qilinadigan qiymatlar: `"pdf"`, `"docx"` (case-insensitive)
+  - Qabul qilinadigan qiymatlar: `"pdf"`, `"docx"`, `"png"` (case-insensitive)
   - Enum validation mavjud
 
 **Muvaffaqiyatli javob:**
@@ -60,17 +60,32 @@ API quyidagi formatlarni qo'llab-quvvatlaydi:
 ### ✅ Qabul qilinadigan formatlar:
 - `"pdf"` yoki `"PDF"`
 - `"docx"` yoki `"DOCX"`
+- `"png"` yoki `"PNG"`
 
 ### ❌ Qabul qilinmaydigan formatlar:
-- `"txt"`, `"jpg"`, `"png"`, `"excel"`, `"xls"`, `"ppt"` va boshqalar
+- `"txt"`, `"jpg"`, `"excel"`, `"xls"`, `"ppt"` va boshqalar
 
 Noto'g'ri format yuborilganda:
 ```json
 {
   "success": false,
-  "error": "Invalid output format. Allowed formats: pdf, docx"
+  "error": "Invalid output format. Allowed formats: pdf, docx, png"
 }
 ```
+
+**PNG konvertatsiya misoli:**
+```bash
+curl -X POST "http://localhost:3000/convert-html" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "htmlLink": "https://example.com/document.html",
+    "outputFormat": "png"
+  }'
+```
+
+PNG A4 ga cho'zilmaydi - rasm HTML kontentining o'z balandligida chiqadi. Kenglik 1240px,
+sifat uchun `deviceScaleFactor: 2` (ya'ni chiqish kengligi 2480px). Kontent qancha uzun
+bo'lsa, rasm ham shuncha uzun bo'ladi.
 
 ## Xatolik kodlari
 
@@ -161,8 +176,9 @@ npm test
 7. **Response:** Natija havolasini qaytarish
 
 ### Format-specific logic:
-- **PDF:** Puppeteer bilan browser rendering va PDF generation
-- **DOCX:** html-to-docx kutubxonasi bilan to'g'ridan-to'g'ri konvertatsiya
+- **PDF:** Puppeteer bilan browser rendering va PDF generation (A4, 20mm margin)
+- **DOCX:** LibreOffice (`soffice --headless`) orqali konvertatsiya, oldindan cheerio bilan HTML tozalanadi
+- **PNG:** Puppeteer `page.screenshot({ fullPage: true })`, viewport kontent balandligiga moslashtiriladi
 
 ## Swagger Documentation
 
