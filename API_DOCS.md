@@ -22,6 +22,7 @@ Bu loyihaga HTML fayllarni PDF va DOCX formatlariga o'tkazish uchun universal AP
   - Qabul qilinadigan qiymatlar: `"pdf"`, `"docx"`, `"png"` (case-insensitive)
   - Enum validation mavjud
 
+
 **Muvaffaqiyatli javob:**
 ```json
 {
